@@ -70,6 +70,7 @@
 #include <KIO/DropJob>
 #include <KIO/FileUndoManager>
 #include <KIO/JobUiDelegate>
+#include <KIO/JobUiDelegateFactory>
 #include <KIO/Paste>
 #include <KIO/PasteJob>
 #include <KIO/RestoreJob>
@@ -118,9 +119,9 @@ FolderModel::FolderModel(QObject *parent)
 
     m_dirLister = new DirLister(this);
     m_dirLister->setDelayedMimeTypes(true);
-    m_dirLister->setAutoErrorHandlingEnabled(false, nullptr);
+    connect(m_dirLister, &KCoreDirLister::jobError, this, [](KIO::Job*) {});
     m_dirLister->setAutoUpdate(true);
-    m_dirLister->setShowingDotFiles(m_showHiddenFiles);
+    m_dirLister->setShowHiddenFiles(m_showHiddenFiles);
     // connect(dirLister, &DirLister::error, this, &FolderModel::notification);
 
     connect(m_dirLister, &KCoreDirLister::started, this, std::bind(&FolderModel::setStatus, this, Status::Listing));
@@ -736,7 +737,7 @@ void FolderModel::refresh()
 
 void FolderModel::undo()
 {
-    if (KIO::FileUndoManager::self()->undoAvailable()) {
+    if (KIO::FileUndoManager::self()->isUndoAvailable()) {
         KIO::FileUndoManager::self()->undo();
     }
 }
@@ -1108,9 +1109,10 @@ void FolderModel::moveSelectedToTrash()
     }
 
     const QList<QUrl> urls = selectedUrls();
-    KIO::JobUiDelegate uiDelegate;
+    std::unique_ptr<KJobUiDelegate> uiDelegate(KIO::createDefaultJobUiDelegate());
+    auto *kioUiDelegate = qobject_cast<KIO::JobUiDelegate*>(uiDelegate.get());
 
-    if (uiDelegate.askDeleteConfirmation(urls, KIO::JobUiDelegate::Trash, KIO::JobUiDelegate::DefaultConfirmation)) {
+    if (kioUiDelegate && kioUiDelegate->askDeleteConfirmation(urls, KIO::JobUiDelegate::Trash, KIO::JobUiDelegate::DefaultConfirmation)) {
         KIO::Job *job = KIO::trash(urls);
         job->uiDelegate()->setAutoErrorHandlingEnabled(true);
         KIO::FileUndoManager::self()->recordJob(KIO::FileUndoManager::Trash, urls, QUrl(QStringLiteral("trash:/")), job);
@@ -1714,7 +1716,7 @@ void FolderModel::setShowHiddenFiles(bool showHiddenFiles)
     if (m_showHiddenFiles != showHiddenFiles) {
         m_showHiddenFiles = showHiddenFiles;
 
-        m_dirLister->setShowingDotFiles(m_showHiddenFiles);
+        m_dirLister->setShowHiddenFiles(m_showHiddenFiles);
         m_dirLister->emitChanges();
 
         QSettings settings("cutefishos", qApp->applicationName());
